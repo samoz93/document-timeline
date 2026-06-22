@@ -9,14 +9,14 @@
   const dispatch = createEventDispatcher();
 
   const nav = [
-    { id: "workspace", label: "Workspace", icon: "⊞" },
-    { id: "timeline", label: "Timeline", icon: "◷" },
-    { id: "workers", label: "Workers", icon: "⚇" },
-    { id: "documents", label: "Documents", icon: "◻" },
-    { id: "lists", label: "Lists", icon: "≡" },
-    { id: "review", label: "Review", icon: "⚠" },
-    { id: "import", label: "Import", icon: "⇧" },
-    { id: "settings", label: "Settings", icon: "⚙" },
+    { id: "workspace",  label: "Workspace",  icon: "⊞" },
+    { id: "import",     label: "Import",     icon: "⇧" },
+    { id: "timeline",   label: "Timeline",   icon: "◷" },
+    { id: "workers",    label: "Workers",    icon: "⚇" },
+    { id: "documents",  label: "Documents",  icon: "◻" },
+    { id: "lists",      label: "Lists",      icon: "≡" },
+    { id: "review",     label: "Review",     icon: "⚠" },
+    { id: "settings",   label: "Settings",   icon: "⚙" },
   ];
 </script>
 

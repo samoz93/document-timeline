@@ -1026,6 +1026,82 @@ export function getLatestIndexingJob(
   );
 }
 
+// ─── Import center summary ────────────────────────────────────────────────────
+
+export type ImportCenterSummary = {
+  company_registry:    { companyCount: number; lastImportAt: string | null; lastImportStatus: string | null };
+  archive_folder:      { fileCount: number; lastJobStatus: string | null; lastJobProgress: number; lastJobAt: string | null };
+  worker_list:         { snapshotCount: number; lastSnapshotDate: string | null; lastRowCount: number };
+  classification_seed: { ruleCount: number; lastImportAt: string | null };
+  template_library:    { templateCount: number; lastImportAt: string | null };
+  verified_corrections:{ lastImportAt: string | null; lastImportStatus: string | null };
+};
+
+export function getImportCenterSummary(db: Database, companyId: string): ImportCenterSummary {
+  const companyCount = (db.prepare("SELECT COUNT(*) as c FROM companies").get() as { c: number }).c;
+  const regJob = db.prepare(
+    "SELECT status, created_at FROM import_jobs WHERE import_type = 'company_registry' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { status: string; created_at: string } | undefined;
+
+  const archJob = db.prepare(
+    "SELECT status, total_files, processed_files, started_at FROM indexing_jobs WHERE company_id = ? ORDER BY started_at DESC LIMIT 1"
+  ).get(companyId) as { status: string; total_files: number; processed_files: number; started_at: string } | undefined;
+
+  const snapRow = db.prepare(
+    "SELECT COUNT(*) as c FROM worker_list_snapshots WHERE company_id = ?"
+  ).get(companyId) as { c: number };
+  const lastSnap = db.prepare(
+    "SELECT snapshot_date, row_count FROM worker_list_snapshots WHERE company_id = ? ORDER BY snapshot_date DESC LIMIT 1"
+  ).get(companyId) as { snapshot_date: string | null; row_count: number } | undefined;
+
+  const ruleCount = (db.prepare("SELECT COUNT(*) as c FROM classification_rules").get() as { c: number }).c;
+  const seedJob = db.prepare(
+    "SELECT created_at FROM import_jobs WHERE import_type = 'classification_seed' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { created_at: string } | undefined;
+
+  const tmplCount = (db.prepare("SELECT COUNT(*) as c FROM template_fingerprints").get() as { c: number }).c;
+  const tmplJob = db.prepare(
+    "SELECT created_at FROM import_jobs WHERE import_type = 'template_library' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { created_at: string } | undefined;
+
+  const corrJob = db.prepare(
+    "SELECT status, created_at FROM import_jobs WHERE import_type = 'verified_corrections' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { status: string; created_at: string } | undefined;
+
+  return {
+    company_registry: {
+      companyCount,
+      lastImportAt: regJob?.created_at ?? null,
+      lastImportStatus: regJob?.status ?? null,
+    },
+    archive_folder: {
+      fileCount: archJob?.total_files ?? 0,
+      lastJobStatus: archJob?.status ?? null,
+      lastJobProgress: archJob && archJob.total_files > 0
+        ? Math.round((archJob.processed_files / archJob.total_files) * 100)
+        : 0,
+      lastJobAt: archJob?.started_at ?? null,
+    },
+    worker_list: {
+      snapshotCount: snapRow.c,
+      lastSnapshotDate: lastSnap?.snapshot_date ?? null,
+      lastRowCount: lastSnap?.row_count ?? 0,
+    },
+    classification_seed: {
+      ruleCount,
+      lastImportAt: seedJob?.created_at ?? null,
+    },
+    template_library: {
+      templateCount: tmplCount,
+      lastImportAt: tmplJob?.created_at ?? null,
+    },
+    verified_corrections: {
+      lastImportAt: corrJob?.created_at ?? null,
+      lastImportStatus: corrJob?.status ?? null,
+    },
+  };
+}
+
 // ─── Ingestion status ─────────────────────────────────────────────────────────
 
 export type IngestionStatus = {
