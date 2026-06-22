@@ -59,6 +59,7 @@ export type DocumentScope =
 export type ClassificationSource =
   | "HEURISTIC"
   | "FOLDER_HINT"
+  | "LOCAL_LLM"
   | "MANUAL"
   | "UNKNOWN";
 

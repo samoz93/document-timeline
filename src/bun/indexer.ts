@@ -27,8 +27,28 @@ import {
   chooseBestDate,
 } from "./dates.ts";
 import { classifyDocument } from "./classifier.ts";
+import {
+  disabledLocalLlmClassifier,
+  makeOllamaClassifier,
+  classifyWithFallback,
+  type LocalLlmClassifier,
+} from "./llm-classifier.ts";
 import { createTimelineEventForDocument } from "./timeline.ts";
 import { createReviewItemsForDocument } from "./review.ts";
+
+// Select LLM backend from environment — disabled unless explicitly set
+function resolveLlmClassifier(): LocalLlmClassifier {
+  const backend = process.env["HEALTHARCH_LLM"];
+  if (backend === "ollama") {
+    return makeOllamaClassifier({
+      baseUrl: process.env["HEALTHARCH_OLLAMA_URL"],
+      model: process.env["HEALTHARCH_OLLAMA_MODEL"],
+    });
+  }
+  return disabledLocalLlmClassifier;
+}
+
+const llmClassifier = resolveLlmClassifier();
 
 export type IndexingJobResult = {
   jobId: string;
@@ -126,14 +146,26 @@ export async function indexFile(
   const allEvidence = [...contentEvidence, ...fnEvidence, ...folderEvidence, ...fsEvidence];
   const dateResult = chooseBestDate(allEvidence);
 
-  // Classify
-  const classification = classifyDocument({
+  // Classify — heuristic first, optional local LLM fallback for low-confidence docs
+  const heuristicResult = classifyDocument({
     fileName,
     filePath,
     fileExt: ext,
     extractedText: extraction.text,
     ocrUsed: extraction.ocrUsed,
   });
+
+  const classification = await classifyWithFallback(
+    heuristicResult,
+    {
+      fileName,
+      folderPath: filePath,
+      extractedTextSnippet: extraction.text.slice(0, 800),
+      heuristicResult,
+      dateEvidence: allEvidence,
+    },
+    llmClassifier
+  );
 
   // Try to find/create worker if single_worker scope
   let patientId: string | null = null;
