@@ -293,10 +293,37 @@ export function createSchema(db: Database): void {
       FOREIGN KEY(import_job_id) REFERENCES import_jobs(id)
     );
 
+    CREATE TABLE IF NOT EXISTS import_profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      column_mappings_json TEXT NOT NULL,
+      date_formats_json TEXT,
+      sheet_rules_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS company_candidates (
+      id TEXT PRIMARY KEY,
+      source_type TEXT NOT NULL,
+      source_ref TEXT,
+      detected_name TEXT,
+      detected_sgk_registration_no TEXT,
+      detected_address TEXT,
+      confidence REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      matched_company_id TEXT,
+      evidence_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_companies_sgk ON companies(sgk_registration_no);
     CREATE INDEX IF NOT EXISTS idx_import_jobs_type ON import_jobs(import_type);
     CREATE INDEX IF NOT EXISTS idx_staging_job ON import_staging_rows(import_job_id);
     CREATE INDEX IF NOT EXISTS idx_staging_status ON import_staging_rows(mapping_status);
+    CREATE INDEX IF NOT EXISTS idx_candidates_status ON company_candidates(status);
+    CREATE INDEX IF NOT EXISTS idx_candidates_sgk ON company_candidates(detected_sgk_registration_no);
   `);
 
   // ── Migrations: add new columns to existing tables if absent ─────────────────
@@ -1026,10 +1053,142 @@ export function getLatestIndexingJob(
   );
 }
 
+// ─── Import profiles ──────────────────────────────────────────────────────────
+
+import type { ImportProfile, ImportProfileSourceType } from "./importers/importTypes.ts";
+
+export function listImportProfiles(db: Database): ImportProfile[] {
+  return (db.prepare("SELECT * FROM import_profiles ORDER BY name").all() as Array<{
+    id: string; name: string; source_type: string; column_mappings_json: string;
+    date_formats_json: string | null; sheet_rules_json: string | null;
+    created_at: string; updated_at: string;
+  }>).map((r) => ({
+    id: r.id, name: r.name,
+    sourceType: r.source_type as ImportProfileSourceType,
+    columnMappings: JSON.parse(r.column_mappings_json),
+    dateFormats: r.date_formats_json ? JSON.parse(r.date_formats_json) : [],
+    sheetRules: r.sheet_rules_json ? JSON.parse(r.sheet_rules_json) : null,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  }));
+}
+
+export function saveImportProfile(
+  db: Database,
+  input: Omit<ImportProfile, "id" | "createdAt" | "updatedAt">
+): ImportProfile {
+  const id = uuidv4();
+  const ts = now();
+  db.prepare(`
+    INSERT INTO import_profiles (id, name, source_type, column_mappings_json, date_formats_json, sheet_rules_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, input.name, input.sourceType,
+    JSON.stringify(input.columnMappings),
+    JSON.stringify(input.dateFormats),
+    input.sheetRules ? JSON.stringify(input.sheetRules) : null,
+    ts, ts
+  );
+  return { ...input, id, createdAt: ts, updatedAt: ts };
+}
+
+export function deleteImportProfile(db: Database, id: string): void {
+  db.prepare("DELETE FROM import_profiles WHERE id = ?").run(id);
+}
+
+// ─── Company candidates ───────────────────────────────────────────────────────
+
+export function upsertCompanyCandidate(
+  db: Database,
+  input: {
+    sourceType: string;
+    sourceRef: string | null;
+    detectedName: string | null;
+    detectedSgk: string | null;
+    confidence: number;
+    evidence?: unknown;
+  }
+): void {
+  // Deduplicate by SGK if present, else by normalized name
+  if (input.detectedSgk) {
+    const existing = db.prepare(
+      "SELECT id FROM company_candidates WHERE detected_sgk_registration_no = ? AND status = 'pending'"
+    ).get(input.detectedSgk) as { id: string } | undefined;
+    if (existing) return;
+  } else if (input.detectedName) {
+    const normName = input.detectedName.toLowerCase().trim();
+    const existing = db.prepare(
+      "SELECT id FROM company_candidates WHERE lower(trim(detected_name)) = ? AND status = 'pending'"
+    ).get(normName) as { id: string } | undefined;
+    if (existing) return;
+  }
+  db.prepare(`
+    INSERT INTO company_candidates
+      (id, source_type, source_ref, detected_name, detected_sgk_registration_no, confidence, status, evidence_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+  `).run(
+    uuidv4(), input.sourceType, input.sourceRef ?? null,
+    input.detectedName ?? null, input.detectedSgk ?? null,
+    input.confidence, input.evidence ? JSON.stringify(input.evidence) : null, now()
+  );
+}
+
+export function listCompanyCandidates(
+  db: Database,
+  status = "pending"
+): Array<{
+  id: string; source_type: string; source_ref: string | null;
+  detected_name: string | null; detected_sgk_registration_no: string | null;
+  detected_address: string | null; confidence: number; status: string;
+  matched_company_id: string | null; evidence_json: string | null; created_at: string;
+}> {
+  return db.prepare(
+    "SELECT * FROM company_candidates WHERE status = ? ORDER BY confidence DESC, created_at DESC"
+  ).all(status) as ReturnType<typeof listCompanyCandidates>;
+}
+
+export function resolveCompanyCandidate(
+  db: Database,
+  candidateId: string,
+  action: "confirm" | "merge" | "reject",
+  matchedCompanyId?: string
+): void {
+  const newStatus = action === "confirm" ? "confirmed" : action === "merge" ? "merged" : "rejected";
+  db.prepare(
+    "UPDATE company_candidates SET status = ?, matched_company_id = ? WHERE id = ?"
+  ).run(newStatus, matchedCompanyId ?? null, candidateId);
+}
+
+export function countPendingCandidates(db: Database): number {
+  return (db.prepare("SELECT COUNT(*) as c FROM company_candidates WHERE status = 'pending'").get() as { c: number }).c;
+}
+
+export function writeImportStagingRows(
+  db: Database,
+  importJobId: string,
+  rows: Array<{ sourceSheet: string | null; rowIndex: number; rawRowJson: string; mappedRowJson?: string; warnings?: string[] }>
+): void {
+  const ts = now();
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO import_staging_rows
+      (id, import_job_id, source_sheet, row_index, raw_row_json, mapped_row_json, mapping_status, warnings_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const r of rows) {
+    stmt.run(
+      uuidv4(), importJobId, r.sourceSheet ?? null, r.rowIndex,
+      r.rawRowJson, r.mappedRowJson ?? null,
+      r.mappedRowJson ? "mapped" : "unmapped",
+      r.warnings?.length ? JSON.stringify(r.warnings) : null,
+      ts
+    );
+  }
+}
+
 // ─── Import center summary ────────────────────────────────────────────────────
 
 export type ImportCenterSummary = {
-  company_registry:    { companyCount: number; lastImportAt: string | null; lastImportStatus: string | null };
+  hr_kronos:           { stagingRowCount: number; lastImportAt: string | null; lastImportStatus: string | null; savedProfileCount: number };
+  company_resolver:    { pendingCount: number; confirmedCount: number; totalCompanies: number };
   archive_folder:      { fileCount: number; lastJobStatus: string | null; lastJobProgress: number; lastJobAt: string | null };
   worker_list:         { snapshotCount: number; lastSnapshotDate: string | null; lastRowCount: number };
   classification_seed: { ruleCount: number; lastImportAt: string | null };
@@ -1038,7 +1197,18 @@ export type ImportCenterSummary = {
 };
 
 export function getImportCenterSummary(db: Database, companyId: string): ImportCenterSummary {
+  // hr_kronos
+  const kronosJob = db.prepare(
+    "SELECT status, created_at FROM import_jobs WHERE import_type = 'hr_kronos' ORDER BY created_at DESC LIMIT 1"
+  ).get() as { status: string; created_at: string } | undefined;
+  const stagingCount = (db.prepare("SELECT COUNT(*) as c FROM import_staging_rows").get() as { c: number }).c;
+  const profileCount = (db.prepare("SELECT COUNT(*) as c FROM import_profiles").get() as { c: number }).c;
+
+  // company_resolver
+  const pendingCandidates = (db.prepare("SELECT COUNT(*) as c FROM company_candidates WHERE status = 'pending'").get() as { c: number }).c;
+  const confirmedCandidates = (db.prepare("SELECT COUNT(*) as c FROM company_candidates WHERE status IN ('confirmed','merged')").get() as { c: number }).c;
   const companyCount = (db.prepare("SELECT COUNT(*) as c FROM companies").get() as { c: number }).c;
+
   const regJob = db.prepare(
     "SELECT status, created_at FROM import_jobs WHERE import_type = 'company_registry' ORDER BY created_at DESC LIMIT 1"
   ).get() as { status: string; created_at: string } | undefined;
@@ -1069,10 +1239,16 @@ export function getImportCenterSummary(db: Database, companyId: string): ImportC
   ).get() as { status: string; created_at: string } | undefined;
 
   return {
-    company_registry: {
-      companyCount,
-      lastImportAt: regJob?.created_at ?? null,
-      lastImportStatus: regJob?.status ?? null,
+    hr_kronos: {
+      stagingRowCount: stagingCount,
+      lastImportAt: kronosJob?.created_at ?? null,
+      lastImportStatus: kronosJob?.status ?? null,
+      savedProfileCount: profileCount,
+    },
+    company_resolver: {
+      pendingCount: pendingCandidates,
+      confirmedCount: confirmedCandidates,
+      totalCompanies: companyCount,
     },
     archive_folder: {
       fileCount: archJob?.total_files ?? 0,

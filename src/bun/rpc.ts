@@ -27,7 +27,10 @@ import {
   type SearchDocumentsInput,
 } from "./db.ts";
 import { scanCompanyFolder } from "./indexer.ts";
+import { previewKronosImport, confirmKronosImport, detectKronosColumnMapping } from "./importers/kronosImporter.ts";
+import { previewCompanyResolverImport, confirmCompanyResolverImport } from "./importers/companyResolverImporter.ts";
 import { previewCompanyRegistryImport, confirmCompanyRegistryImport } from "./importers/companyRegistryImporter.ts";
+import { listImportProfiles, saveImportProfile, deleteImportProfile, listCompanyCandidates, countPendingCandidates } from "./db.ts";
 import { previewArchiveFolderImport, confirmArchiveFolderImport } from "./importers/archivePreviewImporter.ts";
 import { previewWorkerListImport, confirmWorkerListImport } from "./importers/workerListImporter.ts";
 import { previewClassificationSeedImport, confirmClassificationSeedImport } from "./importers/classificationSeedImporter.ts";
@@ -236,6 +239,63 @@ async function dispatch(
         String(p["currentSnapshotId"] ?? "")
       );
     }
+
+    // ── Import profiles ────────────────────────────────────────────────────
+    case "listImportProfiles":
+      return listImportProfiles(db);
+
+    case "saveImportProfile":
+      return saveImportProfile(db, {
+        name: String(p["name"] ?? ""),
+        sourceType: (p["sourceType"] as "kronos" | "generic_excel" | "csv" | "manual") ?? "kronos",
+        columnMappings: (p["columnMappings"] as Record<string, string>) ?? {},
+        dateFormats: (p["dateFormats"] as string[]) ?? [],
+        sheetRules: (p["sheetRules"] as { sheetNamePattern?: string; skipRows?: number; headerRow?: number } | null) ?? null,
+      });
+
+    case "deleteImportProfile":
+      deleteImportProfile(db, String(p["profileId"] ?? ""));
+      return { ok: true };
+
+    // ── HR / Kronos import ─────────────────────────────────────────────────
+    case "previewKronosImport": {
+      const profiles = listImportProfiles(db);
+      return previewKronosImport({
+        filePath: String(p["filePath"] ?? ""),
+        profileId: p["profileId"] ? String(p["profileId"]) : undefined,
+        profiles,
+        overrideMapping: p["overrideMapping"] as Parameters<typeof previewKronosImport>[0]["overrideMapping"],
+      });
+    }
+
+    case "confirmKronosImport":
+      return confirmKronosImport(db, {
+        companyId: String(p["companyId"] ?? ""),
+        filePath: String(p["filePath"] ?? ""),
+        sheetName: p["sheetName"] ? String(p["sheetName"]) : undefined,
+        rows: p["rows"] as Parameters<typeof confirmKronosImport>[1]["rows"],
+        mapping: (p["mapping"] as Parameters<typeof confirmKronosImport>[1]["mapping"]) ?? {},
+        saveProfileAs: p["saveProfileAs"] ? String(p["saveProfileAs"]) : undefined,
+      });
+
+    case "detectKronosColumns":
+      return detectKronosColumnMapping((p["headers"] as string[]) ?? []);
+
+    // ── Company resolver ───────────────────────────────────────────────────
+    case "previewCompanyResolverImport":
+      return previewCompanyResolverImport(db);
+
+    case "confirmCompanyResolverImport":
+      return confirmCompanyResolverImport(
+        db,
+        (p["actions"] as Parameters<typeof confirmCompanyResolverImport>[1]) ?? []
+      );
+
+    case "listCompanyCandidates":
+      return listCompanyCandidates(db, String(p["status"] ?? "pending"));
+
+    case "countPendingCandidates":
+      return { count: countPendingCandidates(db) };
 
     // ── Import: Company Registry ───────────────────────────────────────────
     case "previewCompanyRegistryImport":

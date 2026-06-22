@@ -3,12 +3,82 @@ import type { DocumentCategory, DocumentScope, DocumentType, WorkerListType } fr
 // ─── Generic import preview shell ─────────────────────────────────────────────
 
 export type ImportType =
+  | "hr_kronos"
+  | "company_resolver"
   | "company_registry"
   | "archive_folder"
   | "worker_list"
   | "classification_seed"
   | "template_library"
   | "verified_corrections";
+
+// ─── Import profiles ──────────────────────────────────────────────────────────
+
+export type ImportProfileSourceType = "kronos" | "generic_excel" | "csv" | "manual";
+
+export type ImportProfile = {
+  id: string;
+  name: string;
+  sourceType: ImportProfileSourceType;
+  columnMappings: Record<string, string>;
+  dateFormats: string[];
+  sheetRules: { sheetNamePattern?: string; skipRows?: number; headerRow?: number } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// ─── Kronos / HR import ───────────────────────────────────────────────────────
+
+export type KronosColumnMapping = {
+  external_worker_id?: string;
+  worker_name?: string;
+  tckn?: string;
+  company_name?: string;
+  sgk_registration_no?: string;
+  department?: string;
+  job_title?: string;
+  start_date?: string;
+  end_date?: string;
+  employment_status?: string;
+};
+
+export type KronosPreviewRow = {
+  rowIndex: number;
+  externalWorkerId: string | null;
+  workerName: string | null;
+  tcknMasked: string | null;
+  tcknHash: string | null;
+  tcknRaw: string | null; // memory only, never persisted
+  companyName: string | null;
+  sgkRegistrationNo: string | null;
+  department: string | null;
+  jobTitle: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  employmentStatus: string | null;
+  rawRowJson: string;
+  issues: string[];
+};
+
+// ─── Company candidates ───────────────────────────────────────────────────────
+
+export type CompanyCandidateStatus = "pending" | "confirmed" | "merged" | "rejected";
+
+export type CompanyCandidateRow = {
+  id: string;
+  sourceType: string;
+  sourceRef: string | null;
+  detectedName: string | null;
+  detectedSgk: string | null;
+  detectedAddress: string | null;
+  confidence: number;
+  status: CompanyCandidateStatus;
+  matchedCompanyId: string | null;
+  matchedCompanyName: string | null;
+  workerCount: number;
+  evidenceJson: string | null;
+  createdAt: string;
+};
 
 export type ImportStatus = "ready" | "needs_mapping" | "has_errors";
 

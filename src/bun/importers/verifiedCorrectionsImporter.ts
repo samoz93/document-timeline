@@ -101,7 +101,7 @@ export async function previewVerifiedCorrectionsImport(
         documentType: (item["document_type"] as string) ?? null,
         documentScope: (item["document_scope"] as string) ?? null,
         manualDate: (item["manual_date"] as string) ?? null,
-        workerLink: (item["worker_name"] ?? item["tckn"] ?? item["worker_link"] as string) ?? null,
+        workerLink: ((item["worker_name"] ?? item["tckn"] ?? item["worker_link"]) as string | null) ?? null,
       }));
     } else {
       const spreadsheetRows = await parseSpreadsheet(filePath);
