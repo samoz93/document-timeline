@@ -1,0 +1,27 @@
+{
+  "name": "healtharch-mvp",
+  "version": "0.1.0",
+  "description": "Local-first occupational health archive ingestion and timeline tool",
+  "type": "module",
+  "scripts": {
+    "dev:backend": "bun run --watch src/bun/index.ts",
+    "dev:frontend": "vite dev",
+    "build:frontend": "vite build",
+    "build": "bun build src/bun/index.ts --outdir dist/bun --target bun && vite build",
+    "start": "bun run src/bun/index.ts"
+  },
+  "dependencies": {
+    "mammoth": "^1.7.2",
+    "tesseract.js": "^5.0.4",
+    "xlsx": "^0.18.5",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.0",
+    "@tsconfig/svelte": "^5.0.4",
+    "svelte": "^4.2.18",
+    "svelte-check": "^3.8.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}
