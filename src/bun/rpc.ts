@@ -25,6 +25,15 @@ import {
   type SearchDocumentsInput,
 } from "./db.ts";
 import { scanCompanyFolder } from "./indexer.ts";
+import { previewCompanyRegistryImport, confirmCompanyRegistryImport } from "./importers/companyRegistryImporter.ts";
+import { previewArchiveFolderImport, confirmArchiveFolderImport } from "./importers/archivePreviewImporter.ts";
+import { previewWorkerListImport, confirmWorkerListImport } from "./importers/workerListImporter.ts";
+import { previewClassificationSeedImport, confirmClassificationSeedImport } from "./importers/classificationSeedImporter.ts";
+import { previewTemplateLibraryImport, confirmTemplateLibraryImport } from "./importers/templateLibraryImporter.ts";
+import { previewVerifiedCorrectionsImport, confirmVerifiedCorrectionsImport } from "./importers/verifiedCorrectionsImporter.ts";
+import type { WorkerListType } from "./domain.ts";
+import type { ConfirmWorkerListInput } from "./importers/workerListImporter.ts";
+import type { ConfirmArchiveFolderInput } from "./importers/archivePreviewImporter.ts";
 
 // ─── Safe file opener ─────────────────────────────────────────────────────────
 
@@ -219,6 +228,66 @@ async function dispatch(
         String(p["currentSnapshotId"] ?? "")
       );
     }
+
+    // ── Import: Company Registry ───────────────────────────────────────────
+    case "previewCompanyRegistryImport":
+      return previewCompanyRegistryImport(db, String(p["filePath"] ?? ""));
+
+    case "confirmCompanyRegistryImport":
+      return confirmCompanyRegistryImport(db, {
+        rows: p["rows"] as Parameters<typeof confirmCompanyRegistryImport>[1]["rows"],
+        skipMissingSgk: Boolean(p["skipMissingSgk"]),
+        updateExisting: Boolean(p["updateExisting"]),
+      });
+
+    // ── Import: Archive Folder ─────────────────────────────────────────────
+    case "previewArchiveFolderImport":
+      return previewArchiveFolderImport(db, {
+        folderPath: String(p["folderPath"] ?? ""),
+        mode: (p["mode"] as "single_company" | "multi_company_root") ?? "single_company",
+        companyId: p["companyId"] ? String(p["companyId"]) : undefined,
+      });
+
+    case "confirmArchiveFolderImport":
+      return confirmArchiveFolderImport(
+        db,
+        p as ConfirmArchiveFolderInput,
+        (dbInner, companyId, folderPath) => scanCompanyFolder(dbInner, companyId, folderPath)
+      );
+
+    // ── Import: Worker List ────────────────────────────────────────────────
+    case "previewWorkerListImport":
+      return previewWorkerListImport(db, {
+        filePath: String(p["filePath"] ?? ""),
+        companyId: String(p["companyId"] ?? ""),
+        listTypeHint: p["listTypeHint"] as WorkerListType | undefined,
+      });
+
+    case "confirmWorkerListImport":
+      return confirmWorkerListImport(db, p as ConfirmWorkerListInput);
+
+    // ── Import: Classification Seed ────────────────────────────────────────
+    case "previewClassificationSeedImport":
+      return previewClassificationSeedImport(String(p["filePath"] ?? ""));
+
+    case "confirmClassificationSeedImport":
+      return confirmClassificationSeedImport(db, p["rows"] as Parameters<typeof confirmClassificationSeedImport>[1]);
+
+    // ── Import: Template Library ───────────────────────────────────────────
+    case "previewTemplateLibraryImport":
+      return previewTemplateLibraryImport(String(p["inputPath"] ?? ""));
+
+    case "confirmTemplateLibraryImport":
+      return confirmTemplateLibraryImport(db, p["rows"] as Parameters<typeof confirmTemplateLibraryImport>[1]);
+
+    // ── Import: Verified Corrections ───────────────────────────────────────
+    case "previewVerifiedCorrectionsImport":
+      return previewVerifiedCorrectionsImport(db, String(p["filePath"] ?? ""));
+
+    case "confirmVerifiedCorrectionsImport":
+      return confirmVerifiedCorrectionsImport(db, {
+        rows: p["rows"] as Parameters<typeof confirmVerifiedCorrectionsImport>[1]["rows"],
+      });
 
     default:
       throw new Error(`Unknown RPC method: ${method}`);

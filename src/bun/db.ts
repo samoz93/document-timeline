@@ -42,6 +42,13 @@ export function createSchema(db: Database): void {
       hazard_class TEXT NOT NULL DEFAULT 'UNKNOWN',
       master_folder_path TEXT,
       notes TEXT,
+      sgk_registration_no TEXT UNIQUE,
+      nace_code TEXT,
+      address TEXT,
+      employer_representative TEXT,
+      osgb_responsible_person TEXT,
+      contract_start_date TEXT,
+      contract_end_date TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -220,7 +227,68 @@ export function createSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_review_status ON review_items(status);
     CREATE INDEX IF NOT EXISTS idx_patients_company ON patients(company_id);
     CREATE INDEX IF NOT EXISTS idx_patients_hash ON patients(tckn_hash);
+
+    CREATE TABLE IF NOT EXISTS import_jobs (
+      id TEXT PRIMARY KEY,
+      import_type TEXT NOT NULL,
+      source_path TEXT NOT NULL,
+      company_id TEXT,
+      status TEXT NOT NULL,
+      summary_json TEXT,
+      warnings_json TEXT,
+      errors_json TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(company_id) REFERENCES companies(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS classification_rules (
+      id TEXT PRIMARY KEY,
+      document_type TEXT NOT NULL,
+      category TEXT NOT NULL,
+      document_scope TEXT NOT NULL,
+      keywords_json TEXT,
+      negative_keywords_json TEXT,
+      filename_hints_json TEXT,
+      folder_hints_json TEXT,
+      confidence_boost REAL NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'user',
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS template_fingerprints (
+      id TEXT PRIMARY KEY,
+      document_id TEXT,
+      file_name_pattern TEXT,
+      text_hash TEXT,
+      field_labels_json TEXT,
+      document_type TEXT,
+      category TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_companies_sgk ON companies(sgk_registration_no);
+    CREATE INDEX IF NOT EXISTS idx_import_jobs_type ON import_jobs(import_type);
   `);
+
+  // Migrate existing companies table — add new columns if absent
+  const companyColumns = (db.prepare("PRAGMA table_info(companies)").all() as { name: string }[]).map((r) => r.name);
+  const newCompanyCols: [string, string][] = [
+    ["sgk_registration_no", "TEXT"],
+    ["nace_code", "TEXT"],
+    ["address", "TEXT"],
+    ["employer_representative", "TEXT"],
+    ["osgb_responsible_person", "TEXT"],
+    ["contract_start_date", "TEXT"],
+    ["contract_end_date", "TEXT"],
+  ];
+  for (const [col, type] of newCompanyCols) {
+    if (!companyColumns.includes(col)) {
+      db.exec(`ALTER TABLE companies ADD COLUMN ${col} ${type}`);
+    }
+  }
 }
 
 const now = () => new Date().toISOString();

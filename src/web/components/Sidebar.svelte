@@ -15,6 +15,7 @@
     { id: "documents", label: "Documents", icon: "◻" },
     { id: "lists", label: "Lists", icon: "≡" },
     { id: "review", label: "Review", icon: "⚠" },
+    { id: "import", label: "Import", icon: "⇧" },
     { id: "settings", label: "Settings", icon: "⚙" },
   ];
 </script>

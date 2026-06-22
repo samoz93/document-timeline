@@ -175,6 +175,13 @@ export type Company = {
   hazard_class: HazardClass;
   master_folder_path: string | null;
   notes: string | null;
+  sgk_registration_no: string | null;
+  nace_code: string | null;
+  address: string | null;
+  employer_representative: string | null;
+  osgb_responsible_person: string | null;
+  contract_start_date: string | null;
+  contract_end_date: string | null;
   created_at: string;
   updated_at: string;
 };

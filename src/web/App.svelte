@@ -10,6 +10,7 @@
   import ListsView from "./components/ListsView.svelte";
   import WorkersView from "./components/WorkersView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
+  import ImportCenterView from "./components/ImportCenterView.svelte";
 
   let activeView = "workspace";
   let companies: Company[] = [];
@@ -71,6 +72,8 @@
       <ListsView company={selectedCompany} />
     {:else if activeView === "workers"}
       <WorkersView company={selectedCompany} />
+    {:else if activeView === "import"}
+      <ImportCenterView company={selectedCompany} />
     {:else if activeView === "settings"}
       <SettingsView
         {companies}
