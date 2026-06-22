@@ -95,6 +95,9 @@ export const api = {
   compareWorkerListSnapshots: (previousSnapshotId: string, currentSnapshotId: string) =>
     rpc<WorkerSnapshotDiff>("compareWorkerListSnapshots", { previousSnapshotId, currentSnapshotId }),
 
+  getIngestionStatus: (companyId: string) =>
+    rpc<unknown>("getIngestionStatus", { companyId }),
+
   // Generic call for import center and other dynamic methods
   call: <T = unknown>(method: string, params: unknown = {}) => rpc<T>(method, params),
 };

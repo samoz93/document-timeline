@@ -3,6 +3,7 @@ import path from "path";
 import type { Database } from "bun:sqlite";
 import type { HazardClass } from "./domain.ts";
 import {
+  getIngestionStatus,
   listCompanies,
   createCompany,
   getCompany,
@@ -124,6 +125,9 @@ async function dispatch(
 
     case "getWorkspaceStats":
       return getWorkspaceStats(db, String(p["companyId"] ?? ""));
+
+    case "getIngestionStatus":
+      return getIngestionStatus(db, String(p["companyId"] ?? ""));
 
     // ── Indexing ───────────────────────────────────────────────────────────
     case "startReindex": {

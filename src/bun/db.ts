@@ -269,13 +269,43 @@ export function createSchema(db: Database): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS import_staging_rows (
+      id TEXT PRIMARY KEY,
+      import_job_id TEXT NOT NULL,
+      source_sheet TEXT,
+      row_index INTEGER,
+      raw_row_json TEXT NOT NULL,
+      mapped_row_json TEXT,
+      mapping_status TEXT NOT NULL DEFAULT 'unmapped',
+      warnings_json TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(import_job_id) REFERENCES import_jobs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS import_column_mappings (
+      id TEXT PRIMARY KEY,
+      import_job_id TEXT NOT NULL,
+      source_column TEXT NOT NULL,
+      target_field TEXT,
+      confidence REAL NOT NULL DEFAULT 0,
+      confirmed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(import_job_id) REFERENCES import_jobs(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_companies_sgk ON companies(sgk_registration_no);
     CREATE INDEX IF NOT EXISTS idx_import_jobs_type ON import_jobs(import_type);
+    CREATE INDEX IF NOT EXISTS idx_staging_job ON import_staging_rows(import_job_id);
+    CREATE INDEX IF NOT EXISTS idx_staging_status ON import_staging_rows(mapping_status);
   `);
 
-  // Migrate existing companies table — add new columns if absent
-  const companyColumns = (db.prepare("PRAGMA table_info(companies)").all() as { name: string }[]).map((r) => r.name);
-  const newCompanyCols: [string, string][] = [
+  // ── Migrations: add new columns to existing tables if absent ─────────────────
+  function addColIfMissing(table: string, col: string, type: string) {
+    const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((r) => r.name);
+    if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
+
+  const companyMigrations: [string, string][] = [
     ["sgk_registration_no", "TEXT"],
     ["nace_code", "TEXT"],
     ["address", "TEXT"],
@@ -284,11 +314,21 @@ export function createSchema(db: Database): void {
     ["contract_start_date", "TEXT"],
     ["contract_end_date", "TEXT"],
   ];
-  for (const [col, type] of newCompanyCols) {
-    if (!companyColumns.includes(col)) {
-      db.exec(`ALTER TABLE companies ADD COLUMN ${col} ${type}`);
-    }
-  }
+  for (const [col, type] of companyMigrations) addColIfMissing("companies", col, type);
+
+  const documentMigrations: [string, string][] = [
+    ["raw_metadata_json", "TEXT"],
+    ["extracted_entities_json", "TEXT"],
+    ["classifier_evidence_json", "TEXT"],
+    ["parser_warnings_json", "TEXT"],
+  ];
+  for (const [col, type] of documentMigrations) addColIfMissing("documents", col, type);
+
+  const workerRowMigrations: [string, string][] = [
+    ["raw_row_json", "TEXT"],
+    ["mapped_fields_json", "TEXT"],
+  ];
+  for (const [col, type] of workerRowMigrations) addColIfMissing("worker_list_rows", col, type);
 }
 
 const now = () => new Date().toISOString();
@@ -984,6 +1024,58 @@ export function getLatestIndexingJob(
       SELECT * FROM indexing_jobs WHERE company_id = ? ORDER BY started_at DESC LIMIT 1
     `).get(companyId) as IndexingJob | undefined) ?? null
   );
+}
+
+// ─── Ingestion status ─────────────────────────────────────────────────────────
+
+export type IngestionStatus = {
+  extractionQuality: number;
+  extractionQualityDelta: number;
+  activeJobProgress: number | null;
+  activeJobStatus: string | null;
+  recentAlerts: Array<{ id: string; severity: string; message: string; created_at: string }>;
+  totalDocuments: number;
+  processedToday: number;
+};
+
+export function getIngestionStatus(db: Database, companyId: string): IngestionStatus {
+  const avgConf = (db.prepare(
+    "SELECT AVG(classification_confidence) as avg FROM documents WHERE company_id = ?"
+  ).get(companyId) as { avg: number | null }).avg ?? 0;
+
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const oldAvg = (db.prepare(
+    "SELECT AVG(classification_confidence) as avg FROM documents WHERE company_id = ? AND created_at < ?"
+  ).get(companyId, weekAgo) as { avg: number | null }).avg ?? avgConf;
+
+  const job = db.prepare(
+    "SELECT status, total_files, processed_files FROM indexing_jobs WHERE company_id = ? ORDER BY started_at DESC LIMIT 1"
+  ).get(companyId) as { status: string; total_files: number; processed_files: number } | undefined;
+
+  const activeJobProgress =
+    job?.status === "running" && job.total_files > 0
+      ? Math.round((job.processed_files / job.total_files) * 100)
+      : null;
+
+  const alerts = db.prepare(
+    "SELECT id, severity, message, created_at FROM review_items WHERE company_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 5"
+  ).all(companyId) as Array<{ id: string; severity: string; message: string; created_at: string }>;
+
+  const total = (db.prepare("SELECT COUNT(*) as c FROM documents WHERE company_id = ?").get(companyId) as { c: number }).c;
+  const today = new Date().toISOString().slice(0, 10);
+  const processedToday = (db.prepare(
+    "SELECT COUNT(*) as c FROM documents WHERE company_id = ? AND last_indexed_at LIKE ?"
+  ).get(companyId, today + "%") as { c: number }).c;
+
+  return {
+    extractionQuality: Math.round(avgConf * 1000) / 10,
+    extractionQualityDelta: Math.round((avgConf - oldAvg) * 1000) / 10,
+    activeJobProgress: job?.status === "running" ? (activeJobProgress ?? 0) : null,
+    activeJobStatus: job?.status ?? null,
+    recentAlerts: alerts,
+    totalDocuments: total,
+    processedToday,
+  };
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
